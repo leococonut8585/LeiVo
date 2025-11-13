@@ -306,20 +306,27 @@ async def batch_convert(request: ConversionRequest):
 async def convert_with_upload(
     clone_data: UploadFile = File(...),
     source_audio: UploadFile = File(...),
-    voice_id: str = Form(...)
+    voice_ids: str = Form(...)  # JSON文字列として受け取る
 ):
     """
     クローンJSONと音源をアップロードして変換→ダウンロード
+    複数Voiceパターンで変換可能
     """
     async def generate_progress():
         temp_dir = None
         
         try:
-            # 一時ディレクトリ作成
             import uuid
+            import zipfile
+            
             session_id = str(uuid.uuid4())[:8]
             temp_dir = TEMP_DIR_BASE / f"convert_{session_id}"
             temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # voice_idsをパース
+            voice_id_list = json.loads(voice_ids)
+            if not isinstance(voice_id_list, list):
+                voice_id_list = [voice_id_list]
             
             # クローンデータJSON読み込み
             yield f"data: {json.dumps({'step': 'initializing', 'message': 'クローンデータ読込中...', 'progress': 5})}\n\n"
@@ -332,62 +339,87 @@ async def convert_with_upload(
             yield f"data: {json.dumps({'step': 'saving_audio', 'message': '音源ファイル保存中...', 'progress': 10})}\n\n"
             await asyncio.sleep(0.1)
             
-            source_path = temp_dir / source_audio.filename
             source_content = await source_audio.read()
-            with open(source_path, 'wb') as f:
-                f.write(source_content)
             
-            # 変換実行
-            yield f"data: {json.dumps({'step': 'converting', 'message': '音声変換中...', 'progress': 30})}\n\n"
-            await asyncio.sleep(0.1)
+            # 複数パターンで変換
+            total_patterns = len(voice_id_list)
+            converted_files = []
             
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Cartesia-Version": API_VERSION
             }
             
-            url = f"{BASE_URL}/voice-changer/bytes"
+            for idx, voice_id in enumerate(voice_id_list, 1):
+                # Voice名を取得
+                voice_info = next((v for v in model_info.get('voices', []) if v.get('voice_id') == voice_id), None)
+                voice_name = voice_info.get('name', f'Voice-{idx}') if voice_info else f'Voice-{idx}'
+                
+                progress_val = 10 + int((idx / total_patterns) * 80)
+                yield f"data: {json.dumps({
+                    'step': 'converting',
+                    'message': f'{voice_name}で変換中... ({idx}/{total_patterns})',
+                    'progress': progress_val,
+                    'voice_index': idx,
+                    'total_voices': total_patterns
+                })}\n\n"
+                await asyncio.sleep(0.1)
+                
+                url = f"{BASE_URL}/voice-changer/bytes"
+                
+                files = {
+                    'clip': (source_audio.filename, source_content, 'audio/wav')
+                }
+                
+                data = {
+                    'voice[id]': voice_id,
+                    'output_format[container]': 'wav',
+                    'output_format[sample_rate]': '44100',
+                    'output_format[encoding]': 'pcm_s16le'
+                }
+                
+                response = requests.post(url, headers=headers, files=files, data=data, timeout=300)
+                
+                if response.status_code == 200:
+                    output_filename = f"{voice_name.replace(' - ', '-')}_{source_audio.filename}"
+                    output_path = temp_dir / output_filename
+                    
+                    with open(output_path, 'wb') as f:
+                        f.write(response.content)
+                    
+                    converted_files.append(output_filename)
             
-            files = {
-                'clip': (source_audio.filename, source_content, 'audio/wav')
-            }
-            
-            data = {
-                'voice[id]': voice_id,
-                'output_format[container]': 'wav',
-                'output_format[sample_rate]': '44100',
-                'output_format[encoding]': 'pcm_s16le'
-            }
-            
-            response = requests.post(url, headers=headers, files=files, data=data, timeout=300)
-            
-            if response.status_code != 200:
-                yield f"data: {json.dumps({'step': 'error', 'message': f'変換失敗: {response.status_code}'})}\n\n"
-                return
-            
-            # 変換完了
-            output_filename = f"converted_{source_audio.filename}"
-            output_path = temp_dir / output_filename
-            
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
+            # ZIPファイル作成（複数の場合）
+            if len(converted_files) > 1:
+                zip_filename = f"converted_{Path(source_audio.filename).stem}.zip"
+                zip_path = temp_dir / zip_filename
+                
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for filename in converted_files:
+                        file_path = temp_dir / filename
+                        zipf.write(file_path, filename)
+                
+                download_filename = zip_filename
+                file_size = zip_path.stat().st_size
+            else:
+                download_filename = converted_files[0]
+                file_size = (temp_dir / download_filename).stat().st_size
             
             yield f"data: {json.dumps({
                 'step': 'completed',
                 'message': '変換完了！',
                 'progress': 100,
                 'result': {
-                    'download_filename': output_filename,
-                    'file_size_mb': round(len(response.content) / 1024 / 1024, 1)
+                    'download_filename': download_filename,
+                    'file_size_mb': round(file_size / 1024 / 1024, 1),
+                    'pattern_count': len(converted_files)
                 }
             })}\n\n"
             
         except Exception as e:
+            import traceback
+            print(f"ERROR: {traceback.format_exc()}")
             yield f"data: {json.dumps({'step': 'error', 'message': str(e)})}\n\n"
-        
-        finally:
-            # クリーンアップは後で実行（ダウンロード後）
-            pass
     
     return StreamingResponse(
         generate_progress(),

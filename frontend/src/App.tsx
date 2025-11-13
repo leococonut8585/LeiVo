@@ -39,7 +39,7 @@ interface ConversionProgress {
 function App() {
   const [cloneDataFile, setCloneDataFile] = useState<File | null>(null)
   const [sourceAudioFile, setSourceAudioFile] = useState<File | null>(null)
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('')
+  const [selectedVoiceIds, setSelectedVoiceIds] = useState<string[]>([])
   const [voices, setVoices] = useState<Array<{voice_id: string, name: string, language: string}>>([])
   
   const [isConverting, setIsConverting] = useState(false)
@@ -54,8 +54,9 @@ function App() {
         try {
           const json = JSON.parse(e.target?.result as string)
           setVoices(json.voices || [])
+          // デフォルトで全パターンを選択
           if (json.voices && json.voices.length > 0) {
-            setSelectedVoiceId(json.voices[0].voice_id)
+            setSelectedVoiceIds(json.voices.map((v: any) => v.voice_id))
           }
         } catch (err) {
           setError('クローンJSONの読み込みに失敗しました')
@@ -76,7 +77,7 @@ function App() {
       return
     }
     
-    if (!selectedVoiceId) {
+    if (selectedVoiceIds.length === 0) {
       setError('Voiceパターンを選択してください')
       return
     }
@@ -89,7 +90,8 @@ function App() {
       const formData = new FormData()
       formData.append('clone_data', cloneDataFile)
       formData.append('source_audio', sourceAudioFile)
-      formData.append('voice_id', selectedVoiceId)
+      // 複数voice_idをJSON文字列として送信
+      formData.append('voice_ids', JSON.stringify(selectedVoiceIds))
 
       const response = await fetch('http://localhost:8002/api/convert/upload', {
         method: 'POST',
@@ -241,19 +243,33 @@ function App() {
               {voices.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-zinc-300 mb-2">
-                    Voiceパターン選択 <span className="text-red-400">*</span>
+                    Voiceパターン選択（複数可）<span className="text-red-400">*</span>
                   </label>
-                  <select
-                    value={selectedVoiceId}
-                    onChange={(e) => setSelectedVoiceId(e.target.value)}
-                    className="w-full bg-zinc-700/50 border border-zinc-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-leivo-primary focus:border-transparent transition"
-                  >
+                  <div className="space-y-2 max-h-48 overflow-y-auto bg-zinc-700/30 rounded-lg p-3 border border-zinc-600">
                     {voices.map((voice) => (
-                      <option key={voice.voice_id} value={voice.voice_id}>
-                        {voice.name}
-                      </option>
+                      <label
+                        key={voice.voice_id}
+                        className="flex items-center gap-3 p-2 rounded hover:bg-zinc-600/30 cursor-pointer transition"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedVoiceIds.includes(voice.voice_id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedVoiceIds([...selectedVoiceIds, voice.voice_id])
+                            } else {
+                              setSelectedVoiceIds(selectedVoiceIds.filter(id => id !== voice.voice_id))
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-zinc-500 text-leivo-primary focus:ring-leivo-primary focus:ring-offset-zinc-800"
+                        />
+                        <span className="text-sm text-zinc-200">{voice.name}</span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
+                  <div className="mt-2 text-xs text-zinc-400">
+                    選択中: {selectedVoiceIds.length} / {voices.length}パターン
+                  </div>
                 </div>
               )}
 
@@ -309,11 +325,11 @@ function App() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={startConversion}
-                disabled={isConverting || !cloneDataFile || !sourceAudioFile || !selectedVoiceId}
+                disabled={isConverting || !cloneDataFile || !sourceAudioFile || selectedVoiceIds.length === 0}
                 className="w-full bg-gradient-to-r from-leivo-primary via-leivo-accent to-leivo-secondary hover:from-leivo-secondary hover:via-leivo-accent hover:to-leivo-primary text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-all duration-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundSize: '200% 100%' }}
               >
-                ✨ 変換開始
+                ✨ 変換開始 ({selectedVoiceIds.length}パターン)
               </motion.button>
             </div>
 
@@ -482,7 +498,7 @@ function App() {
                   setCloneDataFile(null)
                   setSourceAudioFile(null)
                   setVoices([])
-                  setSelectedVoiceId('')
+                  setSelectedVoiceIds([])
                 }}
                 className="w-full bg-gradient-to-r from-leivo-primary via-leivo-accent to-leivo-secondary hover:from-leivo-secondary hover:via-leivo-accent hover:to-leivo-primary text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-all duration-500"
                 style={{ backgroundSize: '200% 100%' }}
