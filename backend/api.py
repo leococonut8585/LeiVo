@@ -175,6 +175,21 @@ async def batch_convert(request: ConversionRequest):
                     voice_id = voice.get('voice_id')
                     voice_name = voice.get('name', f'Voice-{voice_idx}')
                     
+                    # 進捗更新（API呼び出し前）
+                    progress_before = 10 + int((completed_conversions / total_conversions) * 85)
+                    yield f"data: {json.dumps({
+                        'step': 'converting',
+                        'message': f'{source_file.name} を {voice_name} で変換中... (処理には数分かかる場合があります)',
+                        'progress': progress_before,
+                        'file_index': file_idx,
+                        'total_files': len(source_files),
+                        'voice_index': voice_idx,
+                        'total_voices': len(voices),
+                        'completed_conversions': completed_conversions,
+                        'total_conversions': total_conversions
+                    })}\n\n"
+                    await asyncio.sleep(0.1)
+                    
                     print(f"🔄 変換開始: {source_file.name} → {voice_name}")
                     
                     try:
