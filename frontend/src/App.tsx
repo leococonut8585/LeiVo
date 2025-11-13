@@ -32,13 +32,15 @@ interface ConversionProgress {
   estimated_remaining_seconds?: number
   speed_seconds_per_file?: number
   result?: {
-    total_files: number
-    total_conversions: number
-    success_count: number
-    failed_count: number
-    total_time_minutes: number
-    output_directory: string
-    results: Array<{
+    download_filename?: string
+    file_size_mb?: number
+    total_files?: number
+    total_conversions?: number
+    success_count?: number
+    failed_count?: number
+    total_time_minutes?: number
+    output_directory?: string
+    results?: Array<{
       source_file: string
       voice_name: string
       output_file: string
@@ -50,31 +52,47 @@ interface ConversionProgress {
 }
 
 function App() {
-  const [models, setModels] = useState<VoiceModel[]>([])
-  const [selectedModel, setSelectedModel] = useState<VoiceModel | null>(null)
-  const [sourceAudioDirectory, setSourceAudioDirectory] = useState('F:/Tuo vo/source_audio')
-  const [outputDirectory, setOutputDirectory] = useState('F:/Tuo vo/ChangeData')
+  const [cloneDataFile, setCloneDataFile] = useState<File | null>(null)
+  const [sourceAudioFile, setSourceAudioFile] = useState<File | null>(null)
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('')
+  const [voices, setVoices] = useState<Array<{voice_id: string, name: string, language: string}>>([])
   
   const [isConverting, setIsConverting] = useState(false)
   const [progress, setProgress] = useState<ConversionProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // モデル一覧を取得
+  // クローンJSONがアップロードされたらVoice一覧を抽出
   useEffect(() => {
-    fetch('http://localhost:8002/api/models')
-      .then(res => res.json())
-      .then(data => {
-        setModels(data.models)
-        if (data.models.length > 0) {
-          setSelectedModel(data.models[0])
+    if (cloneDataFile) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        try {
+          const json = JSON.parse(e.target?.result as string)
+          setVoices(json.voices || [])
+          if (json.voices && json.voices.length > 0) {
+            setSelectedVoiceId(json.voices[0].voice_id)
+          }
+        } catch (err) {
+          setError('クローンJSONの読み込みに失敗しました')
         }
-      })
-      .catch(err => console.error('モデル取得エラー:', err))
-  }, [])
+      }
+      reader.readAsText(cloneDataFile)
+    }
+  }, [cloneDataFile])
 
   const startConversion = async () => {
-    if (!selectedModel) {
-      setError('モデルを選択してください')
+    if (!cloneDataFile) {
+      setError('クローンJSONをアップロードしてください')
+      return
+    }
+    
+    if (!sourceAudioFile) {
+      setError('変換元音源をアップロードしてください')
+      return
+    }
+    
+    if (!selectedVoiceId) {
+      setError('Voiceパターンを選択してください')
       return
     }
 
@@ -83,16 +101,14 @@ function App() {
     setProgress(null)
 
     try {
-      const response = await fetch('http://localhost:8002/api/convert/batch', {
+      const formData = new FormData()
+      formData.append('clone_data', cloneDataFile)
+      formData.append('source_audio', sourceAudioFile)
+      formData.append('voice_id', selectedVoiceId)
+
+      const response = await fetch('http://localhost:8002/api/convert/upload', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model_name: selectedModel.model_name,
-          source_audio_directory: sourceAudioDirectory,
-          output_directory: outputDirectory
-        })
+        body: formData
       })
 
       if (!response.ok) {
@@ -200,106 +216,96 @@ function App() {
             </h2>
 
             <div className="space-y-6">
-              {/* モデル選択 */}
+              {/* クローンJSONアップロード */}
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-2">
-                  Voiceモデル選択 <span className="text-red-400">*</span>
+                  クローンデータ（JSON）<span className="text-red-400">*</span>
                 </label>
-                <select
-                  value={selectedModel?.model_name || ''}
+                <input
+                  type="file"
+                  accept=".json"
                   onChange={(e) => {
-                    const model = models.find(m => m.model_name === e.target.value)
-                    setSelectedModel(model || null)
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      setCloneDataFile(file)
+                      setError(null)
+                    }
                   }}
-                  className="w-full bg-zinc-700/50 border border-zinc-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-leivo-primary focus:border-transparent transition"
+                  className="hidden"
+                  id="clone-upload"
+                />
+                <label
+                  htmlFor="clone-upload"
+                  className="flex items-center justify-center w-full bg-zinc-700/50 border-2 border-dashed border-zinc-600 rounded-lg px-4 py-6 cursor-pointer hover:border-leivo-primary hover:bg-zinc-700/70 transition"
                 >
-                  {models.length === 0 ? (
-                    <option>モデルを読み込み中...</option>
-                  ) : (
-                    models.map((model) => (
-                      <option key={model.model_name} value={model.model_name}>
-                        {model.model_name} ({model.voice_count}パターン)
-                      </option>
-                    ))
-                  )}
-                </select>
+                  <div className="text-center">
+                    <svg className="mx-auto h-10 w-10 text-zinc-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    <p className="text-sm text-zinc-300 font-medium">
+                      {cloneDataFile ? cloneDataFile.name : 'クリックしてJSONを選択'}
+                    </p>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      TuoVoで生成したクローンデータ
+                    </p>
+                  </div>
+                </label>
               </div>
 
-              {/* 選択モデルの詳細 */}
-              {selectedModel && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  className="bg-zinc-700/30 rounded-lg p-4 border border-zinc-600/50"
-                >
-                  <h3 className="text-sm font-semibold text-leivo-primary mb-3">
-                    📊 選択中のモデル詳細
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-zinc-400">パターン数:</span>
-                      <span className="ml-2 text-white font-semibold">{selectedModel.voice_count}個</span>
-                    </div>
-                    <div>
-                      <span className="text-zinc-400">言語:</span>
-                      <span className="ml-2 text-white font-semibold">{selectedModel.language}</span>
-                    </div>
-                    {selectedModel.segment_count && (
-                      <div>
-                        <span className="text-zinc-400">セグメント:</span>
-                        <span className="ml-2 text-white font-semibold">{selectedModel.segment_count}個</span>
-                      </div>
-                    )}
-                    {selectedModel.training_time_minutes && (
-                      <div>
-                        <span className="text-zinc-400">学習時間:</span>
-                        <span className="ml-2 text-white font-semibold">{selectedModel.training_time_minutes.toFixed(1)}分</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Voiceパターン一覧 */}
-                  <div className="mt-4">
-                    <div className="text-xs text-zinc-400 mb-2">変換パターン:</div>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedModel.voices.map((voice) => (
-                        <span
-                          key={voice.voice_id}
-                          className="px-2 py-1 bg-leivo-primary/20 border border-leivo-primary/40 rounded text-xs text-leivo-primary"
-                        >
-                          {voice.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
+              {/* Voice選択（JSONから読み込み後） */}
+              {voices.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-2">
+                    Voiceパターン選択 <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={selectedVoiceId}
+                    onChange={(e) => setSelectedVoiceId(e.target.value)}
+                    className="w-full bg-zinc-700/50 border border-zinc-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-leivo-primary focus:border-transparent transition"
+                  >
+                    {voices.map((voice) => (
+                      <option key={voice.voice_id} value={voice.voice_id}>
+                        {voice.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
 
-              {/* 音源ディレクトリ */}
+              {/* 音源ファイルアップロード */}
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-2">
-                  変換元音源ディレクトリ <span className="text-red-400">*</span>
+                  変換元音源（WAV/MP3）<span className="text-red-400">*</span>
                 </label>
                 <input
-                  type="text"
-                  value={sourceAudioDirectory}
-                  onChange={(e) => setSourceAudioDirectory(e.target.value)}
-                  placeholder="F:/Tuo vo/source_audio"
-                  className="w-full bg-zinc-700/50 border border-zinc-600 rounded-lg px-4 py-3 text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-leivo-primary focus:border-transparent transition font-mono text-sm"
+                  type="file"
+                  accept=".wav,.mp3"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      setSourceAudioFile(file)
+                      setError(null)
+                    }
+                  }}
+                  className="hidden"
+                  id="audio-upload"
                 />
-              </div>
-
-              {/* 出力先 */}
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">
-                  出力先ディレクトリ
+                <label
+                  htmlFor="audio-upload"
+                  className="flex items-center justify-center w-full bg-zinc-700/50 border-2 border-dashed border-zinc-600 rounded-lg px-4 py-6 cursor-pointer hover:border-leivo-accent hover:bg-zinc-700/70 transition"
+                >
+                  <div className="text-center">
+                    <svg className="mx-auto h-10 w-10 text-zinc-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    </svg>
+                    <p className="text-sm text-zinc-300 font-medium">
+                      {sourceAudioFile ? sourceAudioFile.name : 'クリックして音源を選択'}
+                    </p>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      {sourceAudioFile && `${(sourceAudioFile.size / 1024 / 1024).toFixed(2)} MB`}
+                    </p>
+                  </div>
                 </label>
-                <input
-                  type="text"
-                  value={outputDirectory}
-                  onChange={(e) => setOutputDirectory(e.target.value)}
-                  className="w-full bg-zinc-700/50 border border-zinc-600 rounded-lg px-4 py-3 text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-leivo-primary focus:border-transparent transition font-mono text-sm"
-                />
               </div>
 
               {/* エラー表示 */}
@@ -318,7 +324,7 @@ function App() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={startConversion}
-                disabled={isConverting || !selectedModel}
+                disabled={isConverting || !cloneDataFile || !sourceAudioFile || !selectedVoiceId}
                 className="w-full bg-gradient-to-r from-leivo-primary via-leivo-accent to-leivo-secondary hover:from-leivo-secondary hover:via-leivo-accent hover:to-leivo-primary text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-all duration-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundSize: '200% 100%' }}
               >
@@ -330,10 +336,10 @@ function App() {
             <div className="mt-8 p-4 bg-zinc-700/30 rounded-lg border border-zinc-600/50">
               <h3 className="text-sm font-semibold text-leivo-primary mb-2">📌 注意事項</h3>
               <ul className="text-sm text-zinc-400 space-y-1">
-                <li>• 選択したモデルの全パターンで変換されます</li>
-                <li>• ディレクトリ内の全WAVファイルが対象になります</li>
-                <li>• 出力ファイル名: {'{モデル名}_{パターン名}_{元音源名}.wav'}</li>
-                <li>• 処理時間は音源の長さとパターン数に比例します</li>
+                <li>• 1. クローンJSON（TuoVoで生成）をアップロード</li>
+                <li>• 2. 変換したい音源ファイルをアップロード</li>
+                <li>• 3. 使用するVoiceパターンを選択</li>
+                <li>• 処理完了後、変換済み音声をダウンロード可能</li>
               </ul>
             </div>
           </motion.div>
@@ -467,79 +473,20 @@ function App() {
                 </h2>
               </div>
 
-              {/* サマリー */}
-              <div className="grid grid-cols-3 gap-4 mb-8">
-                <div className="bg-zinc-700/30 rounded-lg p-4 border border-green-500/30">
-                  <div className="text-sm text-zinc-400 mb-1">成功</div>
-                  <div className="text-3xl font-bold text-green-400">
-                    {progress.result.success_count}
-                  </div>
-                </div>
-                <div className="bg-zinc-700/30 rounded-lg p-4 border border-leivo-primary/30">
-                  <div className="text-sm text-zinc-400 mb-1">音源数</div>
-                  <div className="text-3xl font-bold text-leivo-primary">
-                    {progress.result.total_files}
-                  </div>
-                </div>
-                <div className="bg-zinc-700/30 rounded-lg p-4 border border-leivo-accent/30">
-                  <div className="text-sm text-zinc-400 mb-1">処理時間</div>
-                  <div className="text-3xl font-bold text-leivo-accent">
-                    {progress.result.total_time_minutes.toFixed(1)}分
-                  </div>
-                </div>
-              </div>
-
-              {/* 変換結果一覧 */}
-              <div className="mb-6">
-                <h3 className="text-xl font-semibold mb-4 text-leivo-primary">変換結果</h3>
-                <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
-                  {progress.result.results.map((result, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                      className={`rounded-lg p-3 border ${
-                        result.status === 'success'
-                          ? 'bg-green-900/20 border-green-500/30'
-                          : 'bg-red-900/20 border-red-500/30'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between text-sm">
-                        <div className="flex-1">
-                          <div className="font-semibold text-white">
-                            {result.source_file} → {result.voice_name}
-                          </div>
-                          {result.status === 'success' ? (
-                            <div className="text-xs text-zinc-400 mt-1 font-mono">
-                              {result.file_size_mb.toFixed(1)}MB
-                            </div>
-                          ) : (
-                            <div className="text-xs text-red-400 mt-1">
-                              {result.error}
-                            </div>
-                          )}
-                        </div>
-                        <div className={`px-2 py-1 rounded text-xs ${
-                          result.status === 'success'
-                            ? 'bg-green-500/20 text-green-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {result.status === 'success' ? '✓' : '✗'}
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-
-              {/* 保存先情報 */}
-              <div className="bg-zinc-700/30 rounded-lg p-4 border border-zinc-600/50 mb-6">
-                <h3 className="text-sm font-semibold text-zinc-300 mb-2">💾 保存先</h3>
-                <div className="text-sm text-white font-mono break-all">
-                  {progress.result.output_directory}
-                </div>
-              </div>
+              {/* ダウンロードボタン */}
+              {progress.result.download_filename && (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    const url = `http://localhost:8002/api/download/${progress.result!.download_filename}`
+                    window.open(url, '_blank')
+                  }}
+                  className="w-full bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-all duration-300 mb-4"
+                >
+                  📥 変換済み音声をダウンロード ({progress.result.file_size_mb?.toFixed(1)} MB)
+                </motion.button>
+              )}
 
               {/* 新規変換ボタン */}
               <motion.button
@@ -547,6 +494,10 @@ function App() {
                 whileTap={{ scale: 0.98 }}
                 onClick={() => {
                   setProgress(null)
+                  setCloneDataFile(null)
+                  setSourceAudioFile(null)
+                  setVoices([])
+                  setSelectedVoiceId('')
                 }}
                 className="w-full bg-gradient-to-r from-leivo-primary via-leivo-accent to-leivo-secondary hover:from-leivo-secondary hover:via-leivo-accent hover:to-leivo-primary text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-all duration-500"
                 style={{ backgroundSize: '200% 100%' }}

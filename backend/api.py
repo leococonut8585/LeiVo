@@ -2,9 +2,9 @@
 LeiVo Backend API
 Cartesia Voice Conversion のための FastAPI アプリケーション
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from pathlib import Path
 import json
@@ -33,6 +33,7 @@ app.add_middleware(
 BASE_DIR = Path("F:/Tuo vo")
 CLONE_DATA_DIR = Path("C:/Users/dokog/OneDrive/仕事/アプリ制作/CloneData")
 CHANGE_DATA_DIR = BASE_DIR / "ChangeData"
+TEMP_DIR_BASE = Path("temp_leivo")
 
 # Cartesia API設定
 API_KEY = os.getenv("CARTESIA_API_KEY")
@@ -299,6 +300,121 @@ async def batch_convert(request: ConversionRequest):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@app.post("/api/convert/upload")
+async def convert_with_upload(
+    clone_data: UploadFile = File(...),
+    source_audio: UploadFile = File(...),
+    voice_id: str = Form(...)
+):
+    """
+    クローンJSONと音源をアップロードして変換→ダウンロード
+    """
+    async def generate_progress():
+        temp_dir = None
+        
+        try:
+            # 一時ディレクトリ作成
+            import uuid
+            session_id = str(uuid.uuid4())[:8]
+            temp_dir = TEMP_DIR_BASE / f"convert_{session_id}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # クローンデータJSON読み込み
+            yield f"data: {json.dumps({'step': 'initializing', 'message': 'クローンデータ読込中...', 'progress': 5})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            clone_content = await clone_data.read()
+            model_info = json.loads(clone_content)
+            
+            # 音源ファイル保存
+            yield f"data: {json.dumps({'step': 'saving_audio', 'message': '音源ファイル保存中...', 'progress': 10})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            source_path = temp_dir / source_audio.filename
+            source_content = await source_audio.read()
+            with open(source_path, 'wb') as f:
+                f.write(source_content)
+            
+            # 変換実行
+            yield f"data: {json.dumps({'step': 'converting', 'message': '音声変換中...', 'progress': 30})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            headers = {
+                "Authorization": f"Bearer {API_KEY}",
+                "Cartesia-Version": API_VERSION
+            }
+            
+            url = f"{BASE_URL}/voice-changer/bytes"
+            
+            files = {
+                'clip': (source_audio.filename, source_content, 'audio/wav')
+            }
+            
+            data = {
+                'voice[id]': voice_id,
+                'output_format[container]': 'wav',
+                'output_format[sample_rate]': '44100',
+                'output_format[encoding]': 'pcm_s16le'
+            }
+            
+            response = requests.post(url, headers=headers, files=files, data=data, timeout=300)
+            
+            if response.status_code != 200:
+                yield f"data: {json.dumps({'step': 'error', 'message': f'変換失敗: {response.status_code}'})}\n\n"
+                return
+            
+            # 変換完了
+            output_filename = f"converted_{source_audio.filename}"
+            output_path = temp_dir / output_filename
+            
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            
+            yield f"data: {json.dumps({
+                'step': 'completed',
+                'message': '変換完了！',
+                'progress': 100,
+                'result': {
+                    'download_filename': output_filename,
+                    'file_size_mb': round(len(response.content) / 1024 / 1024, 1)
+                }
+            })}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'step': 'error', 'message': str(e)})}\n\n"
+        
+        finally:
+            # クリーンアップは後で実行（ダウンロード後）
+            pass
+    
+    return StreamingResponse(
+        generate_progress(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.get("/api/download/{filename}")
+async def download_converted_audio(filename: str):
+    """
+    変換済み音声をダウンロード
+    """
+    # 一時ディレクトリから検索
+    for temp_dir in TEMP_DIR_BASE.glob("convert_*"):
+        file_path = temp_dir / filename
+        if file_path.exists():
+            return FileResponse(
+                path=str(file_path),
+                filename=filename,
+                media_type="audio/wav"
+            )
+    
+    raise HTTPException(status_code=404, detail="ファイルが見つかりません")
 
 
 if __name__ == "__main__":
