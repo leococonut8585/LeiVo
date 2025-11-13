@@ -31,7 +31,7 @@ app.add_middleware(
 
 # パス設定
 BASE_DIR = Path("F:/Tuo vo")
-CLONE_DATA_DIR = BASE_DIR / "CloneData"
+CLONE_DATA_DIR = Path("C:/Users/dokog/OneDrive/仕事/アプリ制作/CloneData")
 CHANGE_DATA_DIR = BASE_DIR / "ChangeData"
 
 # Cartesia API設定
@@ -60,8 +60,8 @@ async def get_models():
     """
     models = []
     
-    # CloneDataディレクトリから*_pro_info.jsonファイルを検索
-    for json_file in CLONE_DATA_DIR.glob("voice_clone_*_pro_info.json"):
+    # CloneDataディレクトリから*_pro_info.jsonファイルを再帰検索
+    for json_file in CLONE_DATA_DIR.rglob("voice_clone_*_pro_info.json"):
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
                 info = json.load(f)
@@ -98,13 +98,17 @@ async def batch_convert(request: ConversionRequest):
             yield f"data: {json.dumps({'step': 'initializing', 'message': '初期化中...', 'progress': 0})}\n\n"
             await asyncio.sleep(0.1)
             
-            # モデル情報を読み込み
+            # モデル情報を読み込み（再帰検索）
             model_name_lower = request.model_name.lower().replace(' ', '_')
-            model_json = CLONE_DATA_DIR / f"voice_clone_{model_name_lower}_pro_info.json"
+            model_json_pattern = f"voice_clone_{model_name_lower}_pro_info.json"
+            model_json_files = list(CLONE_DATA_DIR.rglob(model_json_pattern))
             
-            if not model_json.exists():
-                yield f"data: {json.dumps({'step': 'error', 'message': f'モデル情報が見つかりません: {model_json}'})}\n\n"
+            if not model_json_files:
+                yield f"data: {json.dumps({'step': 'error', 'message': f'モデル情報が見つかりません: {model_json_pattern}'})}\n\n"
                 return
+            
+            # 最初に見つかったファイルを使用
+            model_json = model_json_files[0]
             
             with open(model_json, 'r', encoding='utf-8') as f:
                 model_info = json.load(f)
