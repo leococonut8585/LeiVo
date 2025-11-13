@@ -23,7 +23,11 @@ app = FastAPI(title="LeiVo API", version="1.0.0")
 # CORS設定
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5175"],  # Vite開発サーバー
+    allow_origins=[
+        "http://localhost:5175",  # Vite開発サーバー
+        "https://lei-vo.com",
+        "https://www.lei-vo.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

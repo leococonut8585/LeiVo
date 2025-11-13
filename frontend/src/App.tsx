@@ -93,7 +93,11 @@ function App() {
       // 複数voice_idをJSON文字列として送信
       formData.append('voice_ids', JSON.stringify(selectedVoiceIds))
 
-      const response = await fetch('http://localhost:8002/api/convert/upload', {
+      const apiUrl = window.location.hostname === 'localhost'
+        ? 'http://localhost:8002/api/convert/upload'
+        : '/api/convert/upload'
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         body: formData
       })
@@ -479,10 +483,12 @@ function App() {
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    const url = `http://localhost:8002/api/download/${progress.result!.download_filename}`
-                    window.open(url, '_blank')
-                  }}
+                onClick={() => {
+                  const url = window.location.hostname === 'localhost'
+                    ? `http://localhost:8002/api/download/${progress.result!.download_filename}`
+                    : `/api/download/${progress.result!.download_filename}`
+                  window.open(url, '_blank')
+                }}
                   className="w-full bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-all duration-300 mb-4"
                 >
                   📥 変換済み音声をダウンロード ({progress.result.file_size_mb?.toFixed(1)} MB)
