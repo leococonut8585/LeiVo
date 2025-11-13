@@ -1,21 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-interface VoiceModel {
-  model_name: string
-  fine_tune_id: string
-  language: string
-  voice_count: number
-  voices: Array<{
-    voice_id: string
-    name: string
-    language: string
-  }>
-  created_at: string
-  segment_count?: number
-  training_time_minutes?: number
-}
-
 interface ConversionProgress {
   step: string
   message: string
