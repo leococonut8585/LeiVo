@@ -166,12 +166,16 @@ async def batch_convert(request: ConversionRequest):
             
             for file_idx, source_file in enumerate(source_files, 1):
                 # 音声ファイルを読み込み
+                print(f"📁 ファイル読み込み: {source_file}")
                 with open(source_file, 'rb') as f:
                     audio_data = f.read()
+                print(f"   サイズ: {len(audio_data) / (1024*1024):.1f}MB")
                 
                 for voice_idx, voice in enumerate(voices, 1):
                     voice_id = voice.get('voice_id')
                     voice_name = voice.get('name', f'Voice-{voice_idx}')
+                    
+                    print(f"🔄 変換開始: {source_file.name} → {voice_name}")
                     
                     try:
                         # Voice Changer API呼び出し
